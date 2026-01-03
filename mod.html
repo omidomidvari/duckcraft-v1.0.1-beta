@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Duckcraft — Upload Mod (.dcm)</title>
+  <style>
+    :root {
+      --bg: #0f1724;
+      --card: #0b1220;
+      --accent: #ffd166;
+      --muted: #9aa6b2;
+      --danger: #ff6b6b;
+      --max-width: 900px;
+    }
+    html,body { height:100%; margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#071028 0%, #071434 100%); color:#e6eef6; }
+    .wrap { max-width: var(--max-width); margin:40px auto; padding:24px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:12px; box-shadow: 0 6px 30px rgba(0,0,0,0.6); }
+    h1 { margin:0 0 8px 0; font-size:20px; color:var(--accent); }
+    p.lead { margin:0 0 16px 0; color:var(--muted); }
+    .uploader { display:flex; gap:20px; align-items:flex-start; }
+    .panel { flex:1; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.03); padding:16px; border-radius:8px; }
+    .dropzone { border:2px dashed rgba(255,255,255,0.04); padding:28px; text-align:center; border-radius:8px; cursor:pointer; transition:background .15s; }
+    .dropzone.drag { background: rgba(255,255,255,0.01); border-color: rgba(255,255,255,0.08); }
+    .muted { color:var(--muted); font-size:13px; }
+    input[type=file] { display:none; }
+    button { background:var(--accent); border:none; color:#102028; padding:10px 14px; border-radius:8px; font-weight:600; cursor:pointer; }
+    button.secondary { background:transparent; color:var(--accent); border:1px solid rgba(255,209,102,0.12); }
+    .meta { margin-top:12px; font-size:13px; color:var(--muted); }
+    pre { white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:12px; border-radius:6px; color:#dfeef6; overflow:auto; max-height:220px; }
+    .progress { width:100%; background:rgba(255,255,255,0.03); height:10px; border-radius:10px; overflow:hidden; margin-top:8px; }
+    .progress > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#ffd166,#ff9f1c); transition:width .15s; }
+    .status { margin-top:10px; font-size:14px; }
+    .error { color:var(--danger); }
+    .ok { color:#8df5b3; }
+    .hint { font-size:13px; color:var(--muted); margin-top:8px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+    .small { font-size:13px; color:var(--muted); }
+    footer { margin-top:12px; font-size:12px; color:var(--muted); }
+    @media (max-width:800px) {
+      .uploader { flex-direction:column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" role="main" aria-labelledby="title">
+    <h1 id="title">Upload a Duckcraft Mod (.dcm)</h1>
+    <p class="lead">Select a .dcm file (a renamed .zip or .7z containing your mod). The page will try to preview the manifest if the archive is ZIP.</p>
+
+    <div class="uploader" aria-live="polite">
+      <div class="panel" style="min-width:320px;">
+        <label id="dropzone" class="dropzone" tabindex="0">
+          <strong>Drop your .dcm here</strong>
+          <div class="muted">or click to choose a file</div>
+          <input id="fileInput" type="file" accept=".dcm" />
+        </label>
+
+        <div class="meta" id="fileMeta" hidden>
+          <div><strong id="fileName"></strong> <span class="small" id="fileSize"></span></div>
+          <div class="hint" id="archiveTypeHint"></div>
+          <div class="row">
+            <button id="uploadBtn" disabled>Upload</button>
+            <button id="clearBtn" class="secondary">Clear</button>
+            <div class="small" id="maxSizeHint">Max recommended size: 50 MB</div>
+          </div>
+
+          <div class="status" id="status" aria-live="assertive"></div>
+
+          <div class="progress" id="progress" hidden><i></i></div>
+        </div>
+
+        <footer>
+          <div class="small">This client performs basic checks and attempts to preview manifest.json when possible. Final validation happens on the server.</div>
+        </footer>
+      </div>
+
+      <div class="panel" style="flex:0.9;">
+        <div><strong>Manifest preview</strong> <span class="muted"> (if ZIP inside .dcm)</span></div>
+        <pre id="manifestPreview">No file selected.</pre>
+
+        <div style="margin-top:12px;">
+          <strong>Notes for authors</strong>
+          <ul class="small muted">
+            <li>Required: top-level manifest.json with keys id, name, version, entry, game_version.</li>
+            <li>The runtime will load the file specified in <code>entry</code>. Use relative paths inside the archive.</li>
+            <li>This uploader supports .dcm files that contain ZIP archives. 7z archives will be uploaded but cannot be previewed here.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JSZip for reading ZIPs in-browser (used only for preview) -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha256-fnX3r3d5qvVb4X1s6kXn5oQkG8y7ZkO0D6x9cH9wFMY=" crossorigin="anonymous"></script>
+
+  <script>
+  (function () {
+    const MAX_BYTES = 50 * 1024 * 1024; // client-side recommended max (server may enforce different)
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const fileMeta = document.getElementById('fileMeta');
+    const fileNameEl = document.getElementById('fileName');
+    const fileSizeEl = document.getElementById('fileSize');
+    const archiveTypeHint = document.getElementById('archiveTypeHint');
+    const manifestPreview = document.getElementById('manifestPreview');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const statusEl = document.getElementById('status');
+    const progressWrap = document.getElementById('progress');
+    const progressBar = progressWrap.querySelector('i');
+
+    let selectedFile = null;
+    let detectedArchive = null; // 'zip'|'7z'|'unknown'
+    let detectedManifest = null; // parsed manifest object (if available)
+
+    function resetUI() {
+      selectedFile = null;
+      detectedArchive = null;
+      detectedManifest = null;
+      fileMeta.hidden = true;
+      manifestPreview.textContent = 'No file selected.';
+      archiveTypeHint.textContent = '';
+      statusEl.textContent = '';
+      progressWrap.hidden = true;
+      progressBar.style.width = '0%';
+      uploadBtn.disabled = true;
+    }
+
+    function humanBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+      return (bytes/1024/1024).toFixed(2) + ' MB';
+    }
+
+    function showError(msg) {
+      statusEl.innerHTML = '<span class="error">' + escapeHtml(msg) + '</span>';
+    }
+    function showOk(msg) {
+      statusEl.innerHTML = '<span class="ok">' + escapeHtml(msg) + '</span>';
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    // read first n bytes to detect inner archive magic bytes
+    async function detectArchiveType(file) {
+      // read first 8 bytes
+      const slice = file.slice(0, 8);
+      const buffer = await slice.arrayBuffer();
+      const view = new Uint8Array(buffer);
+      // ZIP magic: 50 4B 03 04
+      if (view.length >= 4 && view[0] === 0x50 && view[1] === 0x4B && view[2] === 0x03 && view[3] === 0x04) {
+        return 'zip';
+      }
+      // 7z magic: 37 7A BC AF 27 1C
+      if (view.length >= 6 && view[0] === 0x37 && view[1] === 0x7A && view[2] === 0xBC && view[3] === 0xAF && view[4] === 0x27 && view[5] === 0x1C) {
+        return '7z';
+      }
+      return 'unknown';
+    }
+
+    // If it's a zip: try to read manifest.json using JSZip
+    async function tryReadManifestFromZip(file) {
+      try {
+        const zip = await JSZip.loadAsync(file);
+        // try exact "manifest.json" or case-insensitive match at root
+        let manifestFile = null;
+        const names = Object.keys(zip.files);
+        // prefer top-level manifest.json
+        if (zip.files['manifest.json']) manifestFile = zip.files['manifest.json'];
+        else {
+          // search case-insensitive for manifest.json anywhere near root
+          for (const name of names) {
+            const base = name.replace(/^\/+|\/+$/g, '');
+            if (base.toLowerCase().endsWith('manifest.json')) { manifestFile = zip.files[name]; break; }
+          }
+        }
+        if (!manifestFile) return { found: false, error: 'manifest.json not found inside ZIP' };
+        const text = await manifestFile.async('string');
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch (err) {
+          return { found: true, error: 'manifest.json present but invalid JSON: ' + err.message, raw: text };
+        }
+        return { found: true, manifest: parsed };
+      } catch (err) {
+        return { found: false, error: 'Failed to parse ZIP: ' + err.message };
+      }
+    }
+
+    async function handleFile(f) {
+      resetUI();
+      if (!f) return;
+      selectedFile = f;
+
+      fileNameEl.textContent = f.name;
+      fileSizeEl.textContent = humanBytes(f.size);
+      fileMeta.hidden = false;
+
+      if (!f.name.toLowerCase().endsWith('.dcm')) {
+        showError('File extension is not .dcm. While you can upload it, please rename to .dcm first.');
+      } else {
+        showOk('Extension OK (.dcm).');
+      }
+
+      if (f.size > MAX_BYTES) {
+        showError('File is larger than the recommended max of ' + humanBytes(MAX_BYTES) + '. Server may reject large files.');
+      }
+
+      // detect inner archive type
+      try {
+        detectedArchive = await detectArchiveType(f);
+      } catch (err) {
+        detectedArchive = 'unknown';
+      }
+      if (detectedArchive === 'zip') {
+        archiveTypeHint.textContent = 'Detected ZIP inside .dcm — attempting to preview manifest.json...';
+        manifestPreview.textContent = 'Reading manifest...';
+        const result = await tryReadManifestFromZip(f);
+        if (!result.found) {
+          manifestPreview.textContent = result.error || 'manifest not found';
+        } else if (result.error) {
+          manifestPreview.textContent = result.error + '\n\nRaw manifest:\n' + (result.raw || '');
+        } else {
+          detectedManifest = result.manifest;
+          manifestPreview.textContent = JSON.stringify(detectedManifest, null, 2);
+          showOk('manifest.json preview available.');
+        }
+      } else if (detectedArchive === '7z') {
+        archiveTypeHint.textContent = 'Detected 7z inside .dcm. Preview not available in-browser, but the file can be uploaded.';
+        manifestPreview.textContent = 'No preview for 7z archives. Server will validate manifest after upload.';
+      } else {
+        archiveTypeHint.textContent = 'Could not detect ZIP or 7z inside .dcm. Server will attempt to validate after upload.';
+        manifestPreview.textContent = 'No preview available.';
+      }
+
+      uploadBtn.disabled = false;
+    }
+
+    // drag & drop
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+    dropzone.addEventListener('dragleave', (e) => { dropzone.classList.remove('drag'); });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault(); dropzone.classList.remove('drag');
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+
+    dropzone.addEventListener('click', (e) => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) handleFile(f);
+    });
+
+    clearBtn.addEventListener('click', () => resetUI());
+
+    // UPLOAD logic:
+    // Preferred flow:
+    // 1) POST /api/mods/request-upload  { filename, size, contentType }
+    //    -> { uploadUrl, uploadId, method:'PUT' }  (presigned)
+    // 2) PUT file to uploadUrl (use XHR for progress)
+    // 3) POST /api/mods/complete-upload { uploadId }
+    //
+    // Fallback: POST /api/mods/upload (multipart/form-data) with the file directly.
+    //
+    // Note: Implement these endpoints on your server or adapt this client to your existing API.
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      uploadBtn.disabled = true;
+      showOk('Preparing upload...');
+      progressWrap.hidden = false;
+      progressBar.style.width = '0%';
+
+      // Step A: request presigned upload
+      let presigned = null;
+      try {
+        const req = await fetch('/api/mods/request-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: selectedFile.name,
+            size: selectedFile.size,
+            contentType: selectedFile.type || 'application/octet-stream'
+          })
+        });
+        if (req.ok) presigned = await req.json();
+        else {
+          // no presigned support or auth missing - fallback
+          presigned = null;
+        }
+      } catch (err) {
+        presigned = null;
+      }
+
+      if (presigned && presigned.uploadUrl) {
+        // Use XHR to PUT to presigned URL to get progress
+        try {
+          await doUploadToUrl(presigned.uploadUrl, presigned.method || 'PUT', selectedFile);
+          showOk('Upload to storage complete — notifying server to process...');
+          // notify server to complete processing
+          try {
+            const completeResp = await fetch('/api/mods/complete-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ uploadId: presigned.uploadId })
+            });
+            if (completeResp.ok) {
+              const json = await completeResp.json();
+              showOk('Upload complete. Server response: ' + (json.message || 'Processing started.'));
+            } else {
+              const text = await completeResp.text();
+              showError('Server failed to complete upload: ' + text);
+            }
+          } catch (err) {
+            showError('Failed to call /api/mods/complete-upload: ' + err.message);
+          }
+        } catch (err) {
+          showError('Upload failed: ' + err.message);
+        } finally {
+          uploadBtn.disabled = false;
+        }
+      } else {
+        // Fallback: upload directly to server endpoint that accepts multipart/form-data
+        try {
+          await doDirectUpload(selectedFile);
+        } catch (err) {
+          showError('Direct upload failed: ' + err.message);
+        } finally {
+          uploadBtn.disabled = false;
+        }
+      }
+    });
+
+    // Use XHR for upload progress
+    function doUploadToUrl(url, method, file) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+        // If the presigned URL requires special headers (like x-amz-acl), you may need to set them here.
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = pct + '%';
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            progressBar.style.width = '100%';
+            resolve();
+          } else {
+            reject(new Error('Upload failed with status ' + xhr.status + ' ' + xhr.statusText + ': ' + xhr.responseText));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error during upload'));
+        xhr.ontimeout = () => reject(new Error('Upload timeout'));
+        xhr.send(file);
+      });
+    }
+
+    // Direct POST fallback with form-data
+    async function doDirectUpload(file) {
+      const form = new FormData();
+      form.append('mod', file, file.name);
+      showOk('Uploading directly to server...');
+      const req = new XMLHttpRequest();
+      return new Promise((resolve, reject) => {
+        req.open('POST', '/api/mods/upload', true);
+        req.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = pct + '%';
+          }
+        };
+        req.onload = () => {
+          if (req.status >= 200 && req.status < 300) {
+            try {
+              const json = JSON.parse(req.responseText || '{}');
+              showOk('Server accepted the file. ' + (json.message || 'Processing started.'));
+              resolve(json);
+            } catch (err) {
+              resolve();
+            }
+          } else {
+            reject(new Error('Server error: ' + req.status + ' ' + req.statusText + ' / ' + req.responseText));
+          }
+        };
+        req.onerror = () => reject(new Error('Network error during upload'));
+        req.send(form);
+      });
+    }
+
+    // initialize
+    resetUI();
+  })();
+  </script>
+</body>
+</html>
