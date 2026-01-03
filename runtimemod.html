@@ -3,51 +3,39 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Duckcraft — Mod Runtime</title>
+  <title>Duckcraft — Mod Runtime </title>
   <style>
-    :root {
-      --bg: #071028;
-      --panel: #071a2a;
-      --accent: #ffd166;
-      --muted: #9aa6b2;
-      --danger: #ff6b6b;
-    }
-    html,body { height:100%; margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#04101a 0%, #052038 100%); color:#e6eef6; }
-    .wrap { padding:12px; }
-    header { display:flex; gap:12px; align-items:center; }
-    header h2 { margin:0; color:var(--accent); font-size:16px; }
-    .meta { color:var(--muted); font-size:13px; margin-top:6px; }
-    .panel { margin-top:12px; padding:12px; background:rgba(255,255,255,0.02); border-radius:8px; border:1px solid rgba(255,255,255,0.02); }
-    pre { white-space:pre-wrap; margin:0; color:#dfeef6; font-size:13px; }
-    .log { margin-top:8px; max-height:180px; overflow:auto; background:rgba(0,0,0,0.15); padding:8px; border-radius:6px; }
-    .status { margin-top:8px; font-size:13px; color:var(--muted); }
-    .error { color:var(--danger); }
-    .controls { margin-top:10px; display:flex; gap:8px; }
-    button { background:var(--accent); border:none; color:#0a1a1a; padding:6px 10px; border-radius:6px; cursor:pointer; font-weight:600; }
-    button.ghost { background:transparent; color:var(--accent); border:1px solid rgba(255,209,102,0.08); }
-    .badge { color:#072024; background:#8df5b3; padding:4px 8px; border-radius:999px; font-weight:700; font-size:12px; }
-    canvas { display:block; margin-top:12px; background:#00121a; border-radius:6px; width:100%; height:240px; }
-    .small { font-size:12px; color:var(--muted); }
+    :root{--bg:#04101a;--accent:#ffd166;--muted:#9aa6b2;--danger:#ff6b6b}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Roboto,Arial;background:linear-gradient(180deg,#04101a,#052038);color:#e6eef6}
+    .wrap{padding:12px}
+    header{display:flex;gap:12px;align-items:center}
+    header h2{margin:0;color:var(--accent);font-size:16px}
+    .panel{margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
+    pre{white-space:pre-wrap;margin:0;color:#dfeef6;font-size:13px}
+    .log{margin-top:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:6px}
+    .status{margin-top:8px;font-size:13px;color:var(--muted)}
+    .error{color:var(--danger)}
+    .controls{margin-top:10px;display:flex;gap:8px}
+    button{background:var(--accent);border:none;color:#072024;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:600}
+    canvas{display:block;margin-top:12px;background:#00121a;border-radius:6px;width:100%;height:240px}
+    .small{font-size:12px;color:var(--muted)}
   </style>
 </head>
 <body>
   <div class="wrap" role="main" aria-live="polite">
     <header>
       <h2 id="title">Duckcraft Mod Runtime</h2>
-      <div id="modBadge" class="badge" style="display:none;">MOD</div>
     </header>
 
-    <div class="meta" id="meta">Waiting for host initialization…</div>
-
-    <div class="panel" id="panel">
+    <div class="panel">
       <div><strong>Manifest</strong></div>
       <pre id="manifest">No manifest loaded.</pre>
 
-      <div class="status" id="status">Idle</div>
+      <div class="status" id="status">Waiting for host init...</div>
 
       <div class="controls">
-        <button id="sendPing" class="ghost">Ping Host</button>
-        <button id="unloadBtn" class="ghost">Unload Mod</button>
+        <button id="ping">Ping Host</button>
+        <button id="unload">Unload Mod</button>
       </div>
 
       <div class="log" id="log"></div>
@@ -55,328 +43,262 @@
       <canvas id="modCanvas" width="800" height="400" aria-label="Mod rendering canvas"></canvas>
 
       <div class="small" style="margin-top:8px;">
-        This runtime runs inside a sandboxed iframe. It communicates with the host only through a MessagePort the host provides.
+        Notes: The parent must transfer a MessagePort when sending the init message. See debugging tips below.
       </div>
     </div>
   </div>
 
   <script>
-  // runtimemod.html
-  // Purpose: load and execute a mod entry module inside this iframe runtime,
-  // communicating with the parent host through a provided MessagePort.
-  // Expected parent handshake:
-  // parentWindow.postMessage({
-  //   type: 'init',
-  //   manifest: { ... },
-  //   allowedPermissions: [...],
-  //   baseUrl: 'https://mods.example.com/mods/duck-valley/' // optional
-  // }, '*', [ messagePort ]);
-  //
-  // The parent must transfer a MessagePort (event.ports[0]) to this iframe.
-  // This runtime will:
-  //  - set up a minimal hostApi object and promise-based RPC to parent
-  //  - import the module at baseUrl + manifest.entry
-  //  - call exported init(hostApi)
-  //  - forward parent messages to mod (if mod exports onMessage)
-  //
-  // Security note: runtime cannot prevent a mod from doing network requests on its own,
-  // but server-side validation and hosting on a separate origin should be used.
-
   (function () {
     'use strict';
+
     const manifestEl = document.getElementById('manifest');
-    const metaEl = document.getElementById('meta');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-    const modBadge = document.getElementById('modBadge');
-    const sendPingBtn = document.getElementById('sendPing');
-    const unloadBtn = document.getElementById('unloadBtn');
+    const pingBtn = document.getElementById('ping');
+    const unloadBtn = document.getElementById('unload');
     const canvas = document.getElementById('modCanvas');
 
+    let port = null;               // MessagePort to host
     let manifest = null;
-    let allowedPermissions = [];
     let baseUrl = null;
-    let port = null; // MessagePort connected to host
-    let modModule = null; // imported module
-    let pendingRequests = new Map(); // id -> {resolve,reject,timeout}
-    let requestCounter = 1;
-    let messageRate = 0;
-    const RATE_LIMIT_PER_SEC = 200;
-    setInterval(() => { messageRate = 0; }, 1000);
+    let modModule = null;          // imported module
+    let pending = new Map();
+    let reqId = 1;
 
+    function now() { return new Date().toISOString().slice(11,23); }
     function log(msg, level='info') {
-      const el = document.createElement('div');
-      el.textContent = (new Date()).toISOString().slice(11,23) + ' — ' + String(msg);
-      if (level === 'error') el.style.color = 'var(--danger)';
-      logEl.appendChild(el);
+      const d = document.createElement('div');
+      d.textContent = `${now()} — ${msg}`;
+      if (level === 'error') d.style.color = 'var(--danger)';
+      logEl.appendChild(d);
       logEl.scrollTop = logEl.scrollHeight;
-      // Mirror to console for debugging
-      if (level === 'error') console.error(msg); else console.log(msg);
+      console[level === 'error' ? 'error' : 'log']('[mod-runtime]', msg);
     }
-
-    function setStatus(s, err=false) {
+    function setStatus(s, isErr=false) {
       statusEl.textContent = s;
-      statusEl.className = err ? 'error' : '';
+      statusEl.className = isErr ? 'error' : '';
     }
 
-    // Create a promise-based RPC send to parent
-    function sendRequestToHost(action, payload = {}) {
-      if (!port) return Promise.reject(new Error('No port to host'));
-      if (messageRate++ > RATE_LIMIT_PER_SEC) return Promise.reject(new Error('Rate limit exceeded'));
-      const id = 'r' + (requestCounter++);
-      const msg = { type: 'request', id, action, payload };
-      return new Promise((resolve, reject) => {
-        const to = setTimeout(() => {
-          pendingRequests.delete(id);
-          reject(new Error('Host response timeout'));
-        }, 30_000);
-        pendingRequests.set(id, { resolve, reject, timeout: to });
-        try {
-          port.postMessage(msg);
-        } catch (err) {
-          clearTimeout(to);
-          pendingRequests.delete(id);
-          reject(err);
-        }
-      });
-    }
-
-    // Host API we expose to mods
-    const hostApi = {
-      // logging
-      log: (...args) => {
-        try {
-          sendRequestToHost('log', { args }).catch(() => {});
-        } catch (e) {}
-        log('[mod] ' + args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' '));
-      },
-
-      // request an action from the host (spawn, play_sound, draw request, etc.)
-      // returns a promise resolving with host response
-      request: (action, payload) => {
-        // permission check: simple mapping. Host also must re-check.
-        if (!manifest || !Array.isArray(manifest.permissions)) {
-          return Promise.reject(new Error('Manifest or permissions not available'));
-        }
-        // For stricter local enforcement, check if action maps to a permission string.
-        // This map can be customized. For now, actions must appear in manifest.permissions.
-        if (!manifest.permissions.includes(action) && !manifest.permissions.includes('*')) {
-          return Promise.reject(new Error('Permission denied for action: ' + action));
-        }
-        return sendRequestToHost(action, payload);
-      },
-
-      // subscribe to host events (mod.onHostEvent will be called by runtime)
-      onHostEvent: (handler) => {
-        if (typeof handler !== 'function') throw new Error('handler must be function');
-        hostApi._hostEventHandler = handler;
-      },
-
-      // get a small snapshot of runtime environment
-      getRuntimeInfo: () => ({ origin: location.origin, baseUrl, manifest })
-    };
-
-    // Handle messages from host (arriving through port)
-    function handlePortMessage(evt) {
-      const data = evt.data;
+    // handle messages that arrive on the transferred MessagePort
+    function handlePortMessage(ev) {
+      const data = ev.data;
       if (!data || typeof data !== 'object') return;
+
       if (data.type === 'response' && data.id) {
-        const record = pendingRequests.get(data.id);
-        if (record) {
-          clearTimeout(record.timeout);
-          pendingRequests.delete(data.id);
-          if (data.ok) record.resolve(data.result);
-          else record.reject(new Error(data.error || 'Host returned error'));
+        const rec = pending.get(data.id);
+        if (rec) {
+          clearTimeout(rec.t);
+          pending.delete(data.id);
+          if (data.ok) rec.resolve(data.result);
+          else rec.reject(new Error(data.error || 'Host error'));
         }
         return;
       }
 
-      // generic event from host to mod
       if (data.type === 'event') {
-        // If the module exports onHostMessage or onMessage, call it
+        // deliver to mod's onHostMessage/onMessage if present
         try {
           if (modModule && typeof modModule.onHostMessage === 'function') {
             modModule.onHostMessage(data.event || {});
-          } else if (modModule && typeof modModule.onMessage === 'function') {
-            modModule.onMessage(data.event || {});
-          } else if (hostApi._hostEventHandler) {
-            hostApi._hostEventHandler(data.event || {});
           } else {
-            log('Host event received but no handler: ' + JSON.stringify(data.event || {}));
+            log('Host event: ' + JSON.stringify(data.event || {}));
           }
-        } catch (err) {
-          log('Error delivering host event to mod: ' + err.message, 'error');
+        } catch (e) {
+          log('Error delivering host event to mod: ' + e.message, 'error');
         }
         return;
       }
 
-      // control messages
       if (data.type === 'control' && data.cmd === 'unload') {
         unloadMod();
+        return;
       }
     }
 
     function installPort(p) {
-      if (port) {
-        try { port.close(); } catch (e) {}
-      }
+      if (port) try { port.close(); } catch(e) {}
       port = p;
       port.onmessage = handlePortMessage;
-      port.start && port.start();
+      // Some browsers need port.start()
+      try { port.start && port.start(); } catch (e) {}
     }
 
-    // Import a module either by direct import or by fetching & creating a blob URL if needed
-    async function importModuleUrl(url) {
+    // send a request to host via port, returns Promise
+    function requestHost(action, payload = {}) {
+      if (!port) return Promise.reject(new Error('No port to host'));
+      const id = 'r' + (reqId++);
+      const msg = { type: 'request', id, action, payload };
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => { pending.delete(id); reject(new Error('Host timed out')); }, 30000);
+        pending.set(id, { resolve, reject, t });
+        try { port.postMessage(msg); } catch (err) { clearTimeout(t); pending.delete(id); reject(err); }
+      });
+    }
+
+    // Try dynamic import, fall back to fetch+blob import, and finally to using entryContent if provided by host
+    async function importModuleUrl(url, fallbackCode) {
+      // If url is a blob URL we can import directly
       try {
-        // Try dynamic import directly
+        log('Attempting dynamic import from ' + url);
         return await import(url);
       } catch (err) {
-        // Some environments may disallow import from certain URLs; fallback to fetch + blob
-        log('Direct import failed, trying fetch+blob import: ' + err.message);
-        const res = await fetch(url, { credentials: 'omit', mode: 'cors' });
-        if (!res.ok) throw new Error('Failed to fetch module: ' + res.status);
-        const code = await res.text();
-        const blob = new Blob([code], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
+        log('Direct import failed: ' + err.message);
+        // try fetch + blob
         try {
-          return await import(blobUrl);
-        } finally {
-          // Keep blobUrl a short time to avoid immediate GC interfering with module execution
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+          const resp = await fetch(url, { credentials: 'omit', mode: 'cors' });
+          if (!resp.ok) throw new Error('Fetch failed: ' + resp.status);
+          const code = await resp.text();
+          const blob = new Blob([code], { type: 'application/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+          try {
+            log('Importing from blob URL fallback');
+            return await import(blobUrl);
+          } finally {
+            // revoke later (keep a bit for execution)
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+          }
+        } catch (err2) {
+          log('Fetch+blob import failed: ' + err2.message);
+          // fallback to entry content provided by host (string)
+          if (fallbackCode) {
+            log('Using entryContent provided by host');
+            const blob = new Blob([fallbackCode], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            try {
+              return await import(blobUrl);
+            } finally {
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+            }
+          }
+          throw new Error('All import methods failed: ' + err.message + ' / ' + (err2 && err2.message));
         }
       }
     }
 
-    async function loadAndStartMod(manifestObj, manifestBaseUrl) {
-      manifest = manifestObj;
-      baseUrl = manifestBaseUrl || (location.href.replace(/[^\/]*$/, ''));
-
+    async function loadAndStart(manifestObj, manifestBaseUrl, entryContent) {
+      manifest = manifestObj || {};
+      baseUrl = manifestBaseUrl || baseUrl || location.href.replace(/[^\/]*$/, '');
       manifestEl.textContent = JSON.stringify(manifest, null, 2);
-      metaEl.textContent = (manifest.name ? manifest.name + ' — ' : '') + (manifest.version ? 'v' + manifest.version : '') + ' (runtime ready)';
-      modBadge.style.display = 'inline-block';
-      setStatus('Loading entry: ' + manifest.entry);
+      setStatus('Loading entry...');
 
       if (!manifest.entry) {
         setStatus('manifest.entry missing', true);
         throw new Error('manifest.entry missing');
       }
 
-      // validate allowedPermissions (provided by host) - host also enforces server-side
+      const entryUrl = new URL(manifest.entry, baseUrl).href;
       try {
-        const entryUrl = new URL(manifest.entry, baseUrl).href;
-        modModule = await importModuleUrl(entryUrl);
+        modModule = await importModuleUrl(entryUrl, entryContent);
       } catch (err) {
-        setStatus('Failed to import mod entry: ' + err.message, true);
-        log('Import error: ' + err.stack || err.message, 'error');
+        log('Import error: ' + err.message, 'error');
+        setStatus('Failed to import module: ' + err.message, true);
+        // notify host about failure if possible
+        try { port && port.postMessage({ type: 'status', status: 'import_failed', error: err.message }); } catch (e) {}
         throw err;
       }
 
-      // call lifecycle method
-      if (modModule && typeof modModule.init === 'function') {
-        try {
-          // Some mods may be sync or async
-          const result = modModule.init(hostApi);
-          if (result && typeof result.then === 'function') {
-            await result;
-          }
-          setStatus('Mod initialized');
-          log('Mod init completed');
-        } catch (err) {
-          setStatus('Mod init threw: ' + err.message, true);
-          log('Mod init error: ' + (err.stack || err.message), 'error');
-          throw err;
-        }
-      } else {
-        setStatus('Mod entry does not export init(hostApi)', true);
-        throw new Error('Mod entry missing init(hostApi)');
+      if (!modModule || typeof modModule.init !== 'function') {
+        setStatus('Module missing init(hostApi)', true);
+        throw new Error('Module must export init(hostApi)');
+      }
+
+      // prepare hostApi minimal surface
+      const hostApi = {
+        log: (...args) => {
+          try { requestHost('log', { args }).catch(()=>{}); } catch(e){}
+          log('[mod] ' + args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' '));
+        },
+        request: (action, payload) => requestHost(action, payload),
+        getManifest: () => manifest,
+        getBaseUrl: () => baseUrl,
+        getCanvas: () => canvas
+      };
+
+      try {
+        const maybePromise = modModule.init(hostApi);
+        if (maybePromise && typeof maybePromise.then === 'function') await maybePromise;
+        setStatus('Mod initialized');
+        log('Mod init completed');
+        try { port && port.postMessage({ type: 'status', status: 'mod_initialized' }); } catch (e) {}
+      } catch (err) {
+        setStatus('Mod init threw: ' + err.message, true);
+        log('Mod init error: ' + (err.stack || err.message), 'error');
+        throw err;
       }
     }
 
     function unloadMod() {
-      if (modModule && typeof modModule.destroy === 'function') {
-        try { modModule.destroy(); } catch (e) { log('Error in mod destroy: ' + e.message, 'error'); }
+      try {
+        if (modModule && typeof modModule.destroy === 'function') {
+          modModule.destroy();
+        }
+      } catch (e) {
+        log('Error during mod destroy: ' + e.message, 'error');
       }
       modModule = null;
       manifest = null;
       manifestEl.textContent = 'No manifest loaded.';
-      metaEl.textContent = 'Unloaded';
-      modBadge.style.display = 'none';
       setStatus('Unloaded');
       log('Mod unloaded');
     }
 
-    // Listen for the initial handshake message with transferred MessagePort
+    // parent handshake: listen for init message with transferred MessagePort.
     window.addEventListener('message', async (ev) => {
       try {
         const data = ev.data;
         if (!data || data.type !== 'init') return;
-        // Expect ports[0] to be the MessagePort
+        // prefer transferred port (ev.ports[0])
         const receivedPort = ev.ports && ev.ports[0];
-        if (!receivedPort) {
-          setStatus('No MessagePort received from host', true);
-          log('Init message missing transferred MessagePort', 'error');
-          return;
+        if (!receivedPort && data.port === 'attached') {
+          // some hosts may try to send port differently; log and continue
+          log('Init received but no MessagePort was transferred');
+        } else if (receivedPort) {
+          installPort(receivedPort);
+          log('MessagePort received from host');
         }
-        installPort(receivedPort);
 
-        // Save manifest and allowedPermissions
-        manifest = data.manifest || null;
-        allowedPermissions = data.allowedPermissions || [];
-        // baseUrl: where the mod files are served from (should be same origin for fetch/import)
-        baseUrl = data.baseUrl || data.modBaseUrl || null;
+        // manifest and baseUrl (server should provide baseUrl where mod files are hosted)
+        const man = data.manifest || null;
+        const bUrl = data.baseUrl || data.modBaseUrl || null;
+        // optional: host can send the file contents of the entry as a string to avoid CORS issues
+        const entryContent = data.entryContent || null;
 
-        // show manifest early (may be partial)
-        manifestEl.textContent = manifest ? JSON.stringify(manifest, null, 2) : 'No manifest provided';
-
-        // reply to host that runtime is ready
         try {
-          port.postMessage({ type: 'status', status: 'runtime_ready' });
-        } catch (e) {}
-
-        // Now attempt to load and start the mod
-        try {
-          await loadAndStartMod(manifest, baseUrl);
+          await loadAndStart(man, bUrl, entryContent);
         } catch (err) {
-          // already handled inside loadAndStartMod with logging/status
+          // already handled inside loadAndStart
         }
       } catch (err) {
-        log('Error during init message handling: ' + err.message, 'error');
+        log('Error handling init message: ' + err.message, 'error');
         setStatus('Init handling error: ' + err.message, true);
       }
     });
 
-    // port-level fallback: in case parent couldn't transfer port, try to accept later via a special message
-    // (Handled above; included for completeness.)
-
-    // Host responses to pending requests come through handlePortMessage -> response type.
-
-    // UI controls
-    sendPingBtn.addEventListener('click', async () => {
+    // UI buttons
+    pingBtn.addEventListener('click', async () => {
       setStatus('Pinging host...');
       try {
-        const res = await sendRequestToHost('ping', { ts: Date.now() });
-        setStatus('Host pong: ' + (res && res.ts ? new Date(res.ts).toISOString() : JSON.stringify(res)));
+        const res = await requestHost('ping', { ts: Date.now() });
+        setStatus('Host replied: ' + JSON.stringify(res));
       } catch (err) {
         setStatus('Ping failed: ' + err.message, true);
       }
     });
 
     unloadBtn.addEventListener('click', () => {
-      try {
-        // Ask host to unload and also unload locally
-        if (port) port.postMessage({ type: 'control', cmd: 'mod_unload_request' });
-      } catch (e) {}
+      try { port && port.postMessage({ type: 'control', cmd: 'unload_request' }); } catch (e){}
       unloadMod();
     });
 
-    // Graceful cleanup when the iframe is being removed
-    window.addEventListener('unload', () => {
-      try { if (port) port.close(); } catch (e) {}
-    });
+    // helpful default log
+    log('Runtime ready. Waiting for parent init message with transferred MessagePort.');
+    setStatus('Waiting for init');
 
-    // Quick safety note in log
-    log('Runtime ready. Waiting for host init message with MessagePort transfer.');
-    setStatus('Waiting for host init');
+    // expose debug helpers for dev console
+    window.__modRuntime = {
+      requestHost, installPort, loadAndStart, unloadMod
+    };
   })();
   </script>
 </body>
