@@ -1,186 +1,242 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>duckcraft v1.0.0 underdev</title>
-<style>
-  body { margin:0; overflow:hidden; background:black }
-  canvas { display:block; image-rendering: pixelated }
-</style>
+    <meta charset="UTF-8" />
+    <title>duckcraft</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="assets/duck.png">
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            font-family: sans-serif;
+            background: #87CEEB;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0.9;
+        }
+    </style>
 </head>
 <body>
+    <div id="info">duckcraft - WASD to move, mouse to look, LEFT CLICK to place, RIGHT CLICK to remove</div>
+    <div id="crosshair"></div>
+    <canvas id="gameCanvas"></canvas>
 
-<canvas id="game"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const canvas = document.querySelector('#gameCanvas');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x87CEEB); // Sky blue
 
-<script>
-/* =====================
-   Render scale (PERFORMANCE)
-   0.5 = 2x faster
-   0.33 = 3x faster
-===================== */
-const SCALE = 0.5;
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x606060);
+        scene.add(ambientLight);
 
-/* =====================
-   Canvas
-===================== */
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 0.5).normalize();
+        scene.add(directionalLight);
 
-function resize() {
-  canvas.width = innerWidth * SCALE;
-  canvas.height = innerHeight * SCALE;
-  canvas.style.width = innerWidth + "px";
-  canvas.style.height = innerHeight + "px";
-}
-addEventListener("resize", resize);
-resize();
+        // Materials
+        const materials = {
+            original: new THREE.MeshLambertMaterial({ color: 0x00ff00 }), // Green
+            stone: new THREE.MeshLambertMaterial({ color: 0x808080 }),   // Grey
+            testObject: new THREE.MeshLambertMaterial({ color: 0x0000ff }) // Blue
+        };
 
-/* =====================
-   Player
-===================== */
-const player = {
-  x: 32,
-  y: 32,
-  angle: 0,
-  fov: Math.PI / 3,
-  height: 1
-};
+        const blockSize = 2;
+        const worldSize = 32;
+        const worldDepth = 16;
 
-/* =====================
-   World
-===================== */
-const MAP_W = 128;
-const MAP_H = 128;
+        const blockGeometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+        const blocks = {}; // Store references to placed blocks
 
-const map = Array.from({ length: MAP_H }, () =>
-  Array.from({ length: MAP_W }, () =>
-    Math.random() < 0.9 ? 1 : 0
-  )
-);
+        // Generate terrain
+        for (let x = -worldSize; x <= worldSize; x++) {
+            for (let z = -worldSize; z <= worldSize; z++) {
+                const surfaceHeight = Math.floor(Math.random() * 3) + 1;
 
-/* =====================
-   Duck sprite
-===================== */
-const duck = [
-  "................",
-  ".....YYYY.......",
-  "...YYYYYYYY.....",
-  "..YYYYYYYYYY....",
-  ".YYYYYYYYYYYY...",
-  ".YYYYYY0000YY...",
-  ".YYYYY000000Y...",
-  ".YYYYY000000Y...",
-  ".YYYYYY0000YY...",
-  "..YYYYYYYYYY....",
-  "...YYYYYYYY.....",
-  ".....YYYY.......",
-  "......YY........",
-  "......YY........",
-  "................",
-  "................"
-];
+                // Surface block
+                const surfaceBlock = new THREE.Mesh(blockGeometry, materials.original);
+                surfaceBlock.position.set(x, surfaceHeight, z);
+                scene.add(surfaceBlock);
+                const key = `${x},${surfaceHeight},${z}`;
+                blocks[key] = surfaceBlock;
 
-function drawDuck(size) {
-  const px = size / 16;
-  const sx = canvas.width / 2 - size / 2;
-  const sy = canvas.height / 2 - size / 2;
+                // Stone layers below
+                for (let y = surfaceHeight - 1; y >= 0; y--) {
+                    const stoneBlock = new THREE.Mesh(blockGeometry, materials.stone);
+                    stoneBlock.position.set(x, y, z);
+                    scene.add(stoneBlock);
+                    const key = `${x},${y},${z}`;
+                    blocks[key] = stoneBlock;
+                }
+            }
+        }
 
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
-      const c = duck[y][x];
-      if (c === "Y") ctx.fillStyle = "#FFD700";
-      else if (c === "0") ctx.fillStyle = "#000";
-      else continue;
-      ctx.fillRect(sx + x * px, sy + y * px, px, px);
-    }
-  }
-}
+        // Camera setup
+        camera.position.set(0, 10, 0);
 
-/* =====================
-   Fast ground raycaster
-===================== */
-function raycastFloor() {
-  const w = canvas.width;
-  const h = canvas.height;
-  const horizon = h / 2;
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
 
-  const cosA = Math.cos(player.angle);
-  const sinA = Math.sin(player.angle);
+        // Movement flags
+        const moveState = {
+            forward: false,
+            backward: false,
+            left: false,
+            right: false
+        };
 
-  for (let x = 0; x < w; x++) {
-    const rayAngle =
-      player.angle - player.fov / 2 + (x / w) * player.fov;
+        // Keyboard controls
+        document.addEventListener('keydown', e => {
+            switch(e.key.toLowerCase()) {
+                case 'w': moveState.forward = true; break;
+                case 's': moveState.backward = true; break;
+                case 'a': moveState.left = true; break;
+                case 'd': moveState.right = true; break;
+            }
+        });
 
-    const dx = Math.cos(rayAngle);
-    const dy = Math.sin(rayAngle);
+        document.addEventListener('keyup', e => {
+            switch(e.key.toLowerCase()) {
+                case 'w': moveState.forward = false; break;
+                case 's': moveState.backward = false; break;
+                case 'a': moveState.left = false; break;
+                case 'd': moveState.right = false; break;
+            }
+        });
 
-    // distance grows downward
-    for (let y = horizon; y < h; y++) {
-      const p = (y - horizon) / h;
-      const dist = player.height / p;
+        // Mouse look
+        let yaw = 0;
+        let pitch = 0;
 
-      const wx = player.x + dx * dist;
-      const wy = player.y + dy * dist;
+        document.addEventListener('mousemove', e => {
+            if (document.pointerLockElement !== canvas) return;
 
-      const mx = wx | 0;
-      const my = wy | 0;
+            const sensitivity = 0.002;
+            yaw -= e.movementX * sensitivity;
+            pitch -= e.movementY * sensitivity;
+            pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+        });
 
-      ctx.fillStyle =
-        map[my]?.[mx] === 1 ? "#00aa00" : "#000";
+        // Lock pointer on click
+        canvas.addEventListener('click', () => {
+            canvas.requestPointerLock();
+        });
 
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-}
+        // Place/Remove Test Objects
+        document.addEventListener('mousedown', e => {
+            if (document.pointerLockElement !== canvas) return;
 
-/* =====================
-   Input
-===================== */
-const keys = {};
-addEventListener("keydown", e => keys[e.key] = true);
-addEventListener("keyup", e => keys[e.key] = false);
+            // Raycaster for interaction
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(), camera);
 
-canvas.addEventListener("contextmenu", e => e.preventDefault());
-canvas.addEventListener("mousedown", e => {
-  const tx = (player.x + Math.cos(player.angle)) | 0;
-  const ty = (player.y + Math.sin(player.angle)) | 0;
-  if (!map[ty]) return;
-  map[ty][tx] = e.button === 0 ? 0 : 1;
-});
+            const intersects = raycaster.intersectObjects(Object.values(blocks));
 
-/* =====================
-   Update
-===================== */
-function update() {
-  const speed = 0.1;
-  if (keys.a) player.angle -= 0.04;
-  if (keys.d) player.angle += 0.04;
-  if (keys.w) {
-    player.x += Math.cos(player.angle) * speed;
-    player.y += Math.sin(player.angle) * speed;
-  }
-  if (keys.s) {
-    player.x -= Math.cos(player.angle) * speed;
-    player.y -= Math.sin(player.angle) * speed;
-  }
-}
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                const face = intersects[0].face.normal;
 
-/* =====================
-   Loop
-===================== */
-function loop() {
-  ctx.fillStyle = "#87CEEB";
-  ctx.fillRect(0, 0, canvas.width, canvas.height / 2);
+                const targetPos = new THREE.Vector3(
+                    Math.round(point.x + face.x * 0.5),
+                    Math.round(point.y + face.y * 0.5),
+                    Math.round(point.z + face.z * 0.5)
+                );
 
-  raycastFloor();
-  drawDuck(48 * SCALE);
+                const key = `${targetPos.x},${targetPos.y},${targetPos.z}`;
 
-  update();
-  requestAnimationFrame(loop);
-}
-loop();
-</script>
+                if (e.button === 0) { // Left click - place
+                    if (!blocks[key]) {
+                        const newObj = new THREE.Mesh(blockGeometry, materials.testObject);
+                        newObj.position.copy(targetPos);
+                        scene.add(newObj);
+                        blocks[key] = newObj;
+                    }
+                } else if (e.button === 2) { // Right click - remove
+                    if (blocks[key] && blocks[key].material !== materials.stone && blocks[key].material !== materials.original) {
+                        scene.remove(blocks[key]);
+                        delete blocks[key];
+                    }
+                }
+            }
+        });
 
+        // Prevent context menu
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const speed = 0.2;
+            const dx = Math.sin(yaw) * speed;
+            const dz = Math.cos(yaw) * speed;
+
+            if (moveState.forward) {
+                camera.position.x -= dx;
+                camera.position.z -= dz;
+            }
+            if (moveState.backward) {
+                camera.position.x += dx;
+                camera.position.z += dz;
+            }
+            if (moveState.left) {
+                camera.position.x -= dz;
+                camera.position.z += dx;
+            }
+            if (moveState.right) {
+                camera.position.x += dz;
+                camera.position.z -= dx;
+            }
+
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        console.log("Voxel world initialized.");
+    </script>
 </body>
 </html>
+
+
 
