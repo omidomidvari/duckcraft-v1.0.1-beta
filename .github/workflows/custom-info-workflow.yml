@@ -1,0 +1,62 @@
+# File: .github/workflows/custom-info-workflow.yml
+# Language: YAML
+
+name: Custom Information Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'Enter the user name'
+        required: true
+        default: 'guest'
+      environment:
+        description: 'Environment to process in'
+        required: true
+        default: 'dev'
+
+jobs:
+  process-info:
+    name: Process Input and Generate Output
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python for processing (optional, can be changed to Node.js or other tools)
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      # Step 3: Handle Inputs
+      - name: Print Input Information
+        run: |
+          echo "Username: ${{ github.event.inputs.username }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          # Export as environment variables for downstream steps
+          echo "USERNAME=${{ github.event.inputs.username }}" >> $GITHUB_ENV
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+      # Step 4: Process Information
+      - name: Process Data
+        run: |
+          # Example: Generate a simple output file based on input values
+          echo "Processing workflow for user: $USERNAME in environment: $ENVIRONMENT"
+          output_file="output_${USERNAME}_${ENVIRONMENT}.txt"
+          echo "Processed for $USERNAME in $ENVIRONMENT environment" > $output_file
+          # Set output for downstream jobs or workflow outputs
+          echo "output_file=$output_file" >> $GITHUB_OUTPUT
+
+      # Step 5: Optional step to upload the output as artifact
+      - name: Upload Processed Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-output
+          path: ${{ steps.process-info.outputs.output_file }}
+
+outputs:
+  result-file:
+    description: 'Path to processed output file'
+    value: ${{ jobs.process-info.outputs.output_file }}
