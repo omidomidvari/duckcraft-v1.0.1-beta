@@ -1,5 +1,5 @@
 # duckcraft v1.0.0
-duckcraft is a 3d raycaster game, soon it wil have placing and breaking logic
+duckcraft is a 3d game, soon it wil have placing and breaking logic
 
 # controls
 w a s d move  a/b look around
