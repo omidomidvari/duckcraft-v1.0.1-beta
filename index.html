@@ -24,67 +24,122 @@ function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; }
 resize(); addEventListener('resize',resize);
 
 // Player
-let player = { x:0, y:2, z:0, vx:0, vz:0, hp:100, hunger:100 };
+let player = { x:0, y:2, z:0, hp:100, hunger:100, jet:false };
 
 // Controls
 const keys = {};
-addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
-addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+addEventListener('keydown',e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===' ') player.jet = true;
+});
+addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=false;
+  if(e.key===' ') player.jet = false;
+});
 
-// World (simple flat blocks)
+// Random World with caves + borders
 const world = [];
-for(let x=-10;x<10;x++){
-  for(let z=-10;z<10;z++){
-    world.push({x: x, y: 0, z: z});
+const SIZE = 30;
+for(let x=-SIZE;x<SIZE;x++){
+  for(let z=-SIZE;z<SIZE;z++){
+    if(Math.abs(x)===SIZE-1 || Math.abs(z)===SIZE-1){
+      world.push({x,y:0,z,type:'border'});
+    } else if(Math.random() > 0.1){
+      world.push({x,y:0,z,type:'grass'});
+    }
+    // caves (holes)
+    if(Math.random() < 0.05){
+      world.push({x,y:-1,z,type:'cave'});
+    }
   }
+}
+
+// Mobs
+const mobs = [];
+for(let i=0;i<10;i++){
+  mobs.push({x:Math.random()*20-10, z:Math.random()*20-10, hp:20});
 }
 
 // Projection
 function project(x,y,z){
-  const scale = 300/(z+5);
+  const dz = z + 5;
+  if (dz <= 0.1) return null;
+  const scale = 300 / dz;
   return {
-    x: canvas.width/2 + x*scale,
-    y: canvas.height/2 - y*scale,
+    x: canvas.width/2 + x * scale,
+    y: canvas.height/2 + 100 - y * scale,
     s: scale
   };
 }
 
-// Movement
+// Update
 function update(){
-  const speed = 0.1;
+  const speed = 0.15;
   if(keys['w']) player.z += speed;
   if(keys['s']) player.z -= speed;
   if(keys['a']) player.x -= speed;
   if(keys['d']) player.x += speed;
 
-  // Survival mechanics
+  // jet engine (jump/hover)
+  if(player.jet) player.y += 0.1;
+  else player.y -= 0.05;
+  if(player.y < 2) player.y = 2;
+
+  // hunger/health
   player.hunger -= 0.01;
-  if(player.hunger < 0) player.hp -= 0.02;
+  if(player.hunger < 0) player.hp -= 0.05;
+
+  // combat (auto hit nearby mobs)
+  mobs.forEach(m=>{
+    const dx = m.x - player.x;
+    const dz = m.z - player.z;
+    const dist = Math.hypot(dx,dz);
+    if(dist < 1.5){ m.hp -= 0.2; player.hp -= 0.05; }
+  });
 
   document.getElementById('hp').textContent = Math.floor(player.hp);
   document.getElementById('hunger').textContent = Math.floor(player.hunger);
 }
 
-// Draw cube
+// Draw block
 function drawBlock(b){
   const dx = b.x - player.x;
   const dz = b.z - player.z;
+  const p = project(dx, b.y - player.y, dz);
+  if(!p) return;
 
-  if(dz < -1) return;
+  let color = '#228B22';
+  if(b.type==='border') color = '#444';
+  if(b.type==='cave') color = '#222';
 
-  const p = project(dx, 0, dz);
-
-  ctx.fillStyle = '#228B22';
-  ctx.fillRect(p.x, p.y, p.s, p.s);
+  ctx.fillStyle = color;
+  ctx.fillRect(p.x - p.s/2, p.y - p.s/2, p.s, p.s);
 }
 
+// Draw mobs
+function drawMob(m){
+  const dx = m.x - player.x;
+  const dz = m.z - player.z;
+  const p = project(dx, 0, dz);
+  if(!p) return;
+
+  ctx.fillStyle = 'red';
+  ctx.fillRect(p.x-5, p.y-5, 10, 10);
+}
+
+// Music (calm loop)
+const audio = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8f6d7baf2.mp3?filename=calm-ambient-110397.mp3');
+audio.loop = true;
+document.body.addEventListener('click', ()=>audio.play(), {once:true});
+
+// Render
 function render(){
   ctx.fillStyle = '#87CEEB';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // Draw world
   world.sort((a,b)=> (b.z-player.z)-(a.z-player.z));
   world.forEach(drawBlock);
+  mobs.forEach(drawMob);
 
   update();
   requestAnimationFrame(render);
