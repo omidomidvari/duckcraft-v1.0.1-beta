@@ -1,23 +1,98 @@
-<html>
-<h1>duckcraft runtime launcher</h1>
-<h6>duckraft launcher 1.0.0</h6>
-<h5>this version of the launcher works with duckcraft 1.0.0 underdev</h6>
-<p>here is the link</p>
-<br>
-<a href="runtime.html">Open duckcraft runtime</a>
-<a href="mod.html">Open duckcraft mod menu</a>
-<a href="runtimemod.html">Open duckcraft runtime (modded)</a>
-<script src="ducklogic.js"></script>
-  <br>
-  <label for="fruits">wasm-plat version</label>
-<select id="vesion" name="wasm-plat version">
-    <option value="">1.0.0</option>
-    <option value="apple">2.0.0</option>
-    <option value="banana">3.0.0</option>
-    <option value="orange">4.0.0 ruby and rust</option>
-</select>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Duckcraft</title>
+<style>
+  body { margin:0; overflow:hidden; background:#87CEEB; font-family:sans-serif; }
+  canvas { display:block; }
+  #ui {
+    position:fixed; top:10px; left:10px; color:white;
+    background:rgba(0,0,0,0.4); padding:10px; border-radius:10px;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">🦆 Duckcraft<br>Health: <span id="hp">100</span><br>Hunger: <span id="hunger">100</span></div>
 
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
 
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; }
+resize(); addEventListener('resize',resize);
+
+// Player
+let player = { x:0, y:2, z:0, vx:0, vz:0, hp:100, hunger:100 };
+
+// Controls
+const keys = {};
+addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+// World (simple flat blocks)
+const world = [];
+for(let x=-10;x<10;x++){
+  for(let z=-10;z<10;z++){
+    world.push({x,y:0,z});
+  }
+}
+
+// Projection
+function project(x,y,z){
+  const scale = 300/(z+5);
+  return {
+    x: canvas.width/2 + x*scale,
+    y: canvas.height/2 - y*scale,
+    s: scale
+  };
+}
+
+// Movement
+function update(){
+  const speed = 0.1;
+  if(keys['w']) player.z += speed;
+  if(keys['s']) player.z -= speed;
+  if(keys['a']) player.x -= speed;
+  if(keys['d']) player.x += speed;
+
+  // Survival mechanics
+  player.hunger -= 0.01;
+  if(player.hunger < 0) player.hp -= 0.02;
+
+  document.getElementById('hp').textContent = Math.floor(player.hp);
+  document.getElementById('hunger').textContent = Math.floor(player.hunger);
+}
+
+// Draw cube
+function drawBlock(b){
+  const dx = b.x - player.x;
+  const dz = b.z - player.z;
+
+  if(dz < -1) return;
+
+  const p = project(dx, 0, dz);
+
+  ctx.fillStyle = '#228B22';
+  ctx.fillRect(p.x, p.y, p.s, p.s);
+}
+
+function render(){
+  ctx.fillStyle = '#87CEEB';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Draw world
+  world.sort((a,b)=> (b.z-player.z)-(a.z-player.z));
+  world.forEach(drawBlock);
+
+  update();
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
 </html>
 
 
