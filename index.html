@@ -26,15 +26,27 @@ resize(); addEventListener('resize',resize);
 // Player
 let player = { x:0, y:2, z:0, hp:100, hunger:100, jet:false };
 
-// Controls
+// Controls (support both key and code for better compatibility)
 const keys = {};
-addEventListener('keydown',e=>{
-  keys[e.key.toLowerCase()]=true;
-  if(e.key===' ') player.jet = true;
+addEventListener('keydown', e => {
+  const k = (e.key || '').toLowerCase();
+  const c = e.code || '';
+  // WASD / arrows
+  if(k === 'w' || c === 'arrowup') keys['w'] = true;
+  if(k === 's' || c === 'arrowdown') keys['s'] = true;
+  if(k === 'a' || c === 'arrowleft') keys['a'] = true;
+  if(k === 'd' || c === 'arrowright') keys['d'] = true;
+  // Spacebar for jet (use code for reliable detection)
+  if(c === 'Space') player.jet = true;
 });
-addEventListener('keyup',e=>{
-  keys[e.key.toLowerCase()]=false;
-  if(e.key===' ') player.jet = false;
+addEventListener('keyup', e => {
+  const k = (e.key || '').toLowerCase();
+  const c = e.code || '';
+  if(k === 'w' || c === 'arrowup') keys['w'] = false;
+  if(k === 's' || c === 'arrowdown') keys['s'] = false;
+  if(k === 'a' || c === 'arrowleft') keys['a'] = false;
+  if(k === 'd' || c === 'arrowright') keys['d'] = false;
+  if(c === 'Space') player.jet = false;
 });
 
 // Random World with caves + borders
@@ -85,17 +97,25 @@ function update(){
   else player.y -= 0.05;
   if(player.y < 2) player.y = 2;
 
-  // hunger/health
-  player.hunger -= 0.01;
-  if(player.hunger < 0) player.hp -= 0.05;
+  // hunger/health (clamped)
+  player.hunger = Math.max(0, player.hunger - 0.01);
+  if(player.hunger <= 0) player.hp = Math.max(0, player.hp - 0.05);
 
-  // combat (auto hit nearby mobs)
+  // combat (auto hit nearby mobs) and simple mob AI (move toward player slowly)
   mobs.forEach(m=>{
+    // tiny AI move
+    m.x += (player.x - m.x) * 0.005;
+    m.z += (player.z - m.z) * 0.005;
+
     const dx = m.x - player.x;
     const dz = m.z - player.z;
     const dist = Math.hypot(dx,dz);
     if(dist < 1.5){ m.hp -= 0.2; player.hp -= 0.05; }
   });
+
+  // clamp stats
+  player.hp = Math.max(0, Math.min(100, player.hp));
+  player.hunger = Math.max(0, Math.min(100, player.hunger));
 
   document.getElementById('hp').textContent = Math.floor(player.hp);
   document.getElementById('hunger').textContent = Math.floor(player.hunger);
@@ -130,14 +150,21 @@ function drawMob(m){
 // Music (calm loop)
 const audio = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8f6d7baf2.mp3?filename=calm-ambient-110397.mp3');
 audio.loop = true;
-document.body.addEventListener('click', ()=>audio.play(), {once:true});
+// Many browsers require a user gesture to start audio. We attach a one-time click to the page to start it safely.
+document.body.addEventListener('click', ()=>{
+  audio.play().catch(err => {
+    // ignore play errors caused by autoplay policies; user can click again to start sound
+    console.warn('Audio play prevented:', err && err.message);
+  });
+}, {once:true});
 
 // Render
 function render(){
   ctx.fillStyle = '#87CEEB';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  world.sort((a,b)=> (b.z-player.z)-(a.z-player.z));
+  // sort by Z so far objects draw behind nearer ones
+  world.sort((a,b)=> b.z - a.z);
   world.forEach(drawBlock);
   mobs.forEach(drawMob);
 
