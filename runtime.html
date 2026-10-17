@@ -1,242 +1,205 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <title>duckcraft</title>
-
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" href="assets/duck.png">
-
-    <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            width: 100%;
-            height: 100%;
-            font-family: sans-serif;
-            background: #87CEEB;
-        }
-
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: white;
-            font-weight: bold;
-            z-index: 100;
-            pointer-events: none;
-        }
-
-        #crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            z-index: 10;
-            opacity: 0.9;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duckcraft</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;font-family:monospace;background:#87ceeb}
+canvas{display:block}
+#title{position:fixed;top:14px;left:18px;color:white;font-size:22px;text-shadow:2px 2px #444;pointer-events:none}
+#help{position:fixed;top:15px;right:15px;padding:12px;background:#0005;color:white;font-size:12px;line-height:1.8;pointer-events:none}
+#cross{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:white;font-size:22px;text-shadow:1px 1px #333;pointer-events:none}
+#bar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:4px;pointer-events:none}
+.slot{width:49px;height:49px;border:2px solid #777;background:#222a;display:grid;place-items:center;color:white}
+.slot.active{border:3px solid white;background:#777a}
+.swatch{width:25px;height:25px;border:1px solid #ffffff55}
+#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#0006}
+#panel{background:#ddd;border:3px solid white;box-shadow:5px 5px #555;padding:28px;text-align:center;width:min(360px,90%)}
+h1{font-size:38px;margin:0;color:#333}
+button{background:#777;color:white;border:2px solid white;padding:12px 32px;font:18px monospace;cursor:pointer}
+#status{position:fixed;top:60px;left:18px;color:white;text-shadow:1px 1px #333;pointer-events:none}
+</style>
 </head>
 <body>
-    <div id="info">duckcraft - WASD to move, mouse to look, LEFT CLICK to place, RIGHT CLICK to remove</div>
-    <div id="crosshair"></div>
-    <canvas id="gameCanvas"></canvas>
+<div id="title">Duckcraft</div>
+<div id="status">Flatland</div>
+<div id="help">WASD — Move<br>Mouse — Look<br>SPACE — Jump<br>Left click — Break<br>Right click — Place<br>1–4 — Select block<br>ESC — Pause</div>
+<div id="cross">+</div>
+<div id="bar"></div>
+<div id="overlay"><div id="panel">
+<h1>Duckcraft</h1>
+<p>A quiet little block world.</p>
+<p>Build whatever you want.</p>
+<button id="play">Play</button>
+<p style="font-size:11px">WASD to move · Mouse to look</p>
+</div></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>
-        const canvas = document.querySelector('#gameCanvas');
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x87CEEB); // Sky blue
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
 
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0x606060);
-        scene.add(ambientLight);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87ceeb);
+scene.fog=new THREE.Fog(0x87ceeb,45,100);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(1, 1, 0.5).normalize();
-        scene.add(directionalLight);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,150);
+camera.rotation.order="YXZ";
 
-        // Materials
-        const materials = {
-            original: new THREE.MeshLambertMaterial({ color: 0x00ff00 }), // Green
-            stone: new THREE.MeshLambertMaterial({ color: 0x808080 }),   // Grey
-            testObject: new THREE.MeshLambertMaterial({ color: 0x0000ff }) // Blue
-        };
+const renderer=new THREE.WebGLRenderer({antialias:false});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
 
-        const blockSize = 2;
-        const worldSize = 32;
-        const worldDepth = 16;
+scene.add(new THREE.HemisphereLight(0xffffff,0x777766,2));
+const sun=new THREE.DirectionalLight(0xffffff,1.4);
+sun.position.set(-30,60,20);
+scene.add(sun);
 
-        const blockGeometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-        const blocks = {}; // Store references to placed blocks
+function texture(color,variation=18){
+ const c=document.createElement("canvas");c.width=c.height=16;
+ const ctx=c.getContext("2d");ctx.fillStyle=color;ctx.fillRect(0,0,16,16);
+ const n=parseInt(color.slice(1),16);
+ const r=n>>16,g=n>>8&255,b=n&255;
+ for(let i=0;i<90;i++){
+  const d=Math.floor(Math.random()*variation*2)-variation;
+  ctx.fillStyle=`rgb(${Math.max(0,Math.min(255,r+d))},${Math.max(0,Math.min(255,g+d))},${Math.max(0,Math.min(255,b+d))})`;
+  ctx.fillRect(Math.random()*16|0,Math.random()*16|0,1,1);
+ }
+ const t=new THREE.CanvasTexture(c);
+ t.magFilter=THREE.NearestFilter;t.minFilter=THREE.NearestFilter;
+ t.colorSpace=THREE.SRGBColorSpace;return t;
+}
+const mat={
+ grass:new THREE.MeshLambertMaterial({map:texture("#65a844")}),
+ dirt:new THREE.MeshLambertMaterial({map:texture("#866043")}),
+ stone:new THREE.MeshLambertMaterial({map:texture("#858585")}),
+ wood:new THREE.MeshLambertMaterial({map:texture("#987044")})
+};
+const grassSide=new THREE.MeshLambertMaterial({map:texture("#659b42")});
+const grassM=[grassSide,grassSide,mat.grass,mat.dirt,grassSide,grassSide];
+const geo=new THREE.BoxGeometry(1,1,1);
+const blocks=new Map(),meshes=[];
+const key=(x,y,z)=>`${x},${y},${z}`;
 
-        // Generate terrain
-        for (let x = -worldSize; x <= worldSize; x++) {
-            for (let z = -worldSize; z <= worldSize; z++) {
-                const surfaceHeight = Math.floor(Math.random() * 3) + 1;
+function addBlock(x,y,z,type="grass"){
+ x=Math.round(x);y=Math.round(y);z=Math.round(z);
+ const k=key(x,y,z);if(blocks.has(k))return;
+ const mesh=new THREE.Mesh(geo,type==="grass"?grassM:mat[type]||mat.dirt);
+ mesh.position.set(x,y,z);mesh.userData={x,y,z,type};
+ scene.add(mesh);blocks.set(k,mesh);meshes.push(mesh);
+}
+function removeBlock(m){
+ const {x,y,z}=m.userData;
+ blocks.delete(key(x,y,z));scene.remove(m);
+ const i=meshes.indexOf(m);if(i>=0)meshes.splice(i,1);
+}
 
-                // Surface block
-                const surfaceBlock = new THREE.Mesh(blockGeometry, materials.original);
-                surfaceBlock.position.set(x, surfaceHeight, z);
-                scene.add(surfaceBlock);
-                const key = `${x},${surfaceHeight},${z}`;
-                blocks[key] = surfaceBlock;
+// Completely flat world: grass at y=0.
+const SIZE=48;
+for(let x=-SIZE/2;x<SIZE/2;x++){
+ for(let z=-SIZE/2;z<SIZE/2;z++){
+  addBlock(x,0,z,"grass");
+  addBlock(x,-1,z,"dirt");
+  addBlock(x,-2,z,"dirt");
+  addBlock(x,-3,z,"stone");
+ }
+}
 
-                // Stone layers below
-                for (let y = surfaceHeight - 1; y >= 0; y--) {
-                    const stoneBlock = new THREE.Mesh(blockGeometry, materials.stone);
-                    stoneBlock.position.set(x, y, z);
-                    scene.add(stoneBlock);
-                    const key = `${x},${y},${z}`;
-                    blocks[key] = stoneBlock;
-                }
-            }
-        }
+// Player and controls.
+const player=new THREE.Vector3(0,2.7,0);
+const keys={};
+let yaw=0,pitch=0,vy=0,grounded=true;
+const ray=new THREE.Raycaster();ray.far=6;
 
-        // Camera setup
-        camera.position.set(0, 10, 0);
+const types=[
+ {name:"grass",color:"#65a844"},
+ {name:"dirt",color:"#866043"},
+ {name:"stone",color:"#858585"},
+ {name:"wood",color:"#987044"}
+];
+let selected=0;
+const bar=document.querySelector("#bar");
+types.forEach((t,i)=>{
+ const el=document.createElement("div");
+ el.className="slot"+(i===0?" active":"");
+ el.innerHTML=`<div class="swatch" style="background:${t.color}"></div><small>${i+1}</small>`;
+ bar.appendChild(el);
+});
+function select(n){
+ selected=(n+types.length)%types.length;
+ [...bar.children].forEach((e,i)=>e.classList.toggle("active",i===selected));
+}
 
-        // Resize handler
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+const overlay=document.querySelector("#overlay");
+document.querySelector("#play").onclick=()=>renderer.domElement.requestPointerLock();
+document.addEventListener("pointerlockchange",()=>{
+ overlay.style.display=document.pointerLockElement===renderer.domElement?"none":"grid";
+});
+document.addEventListener("mousemove",e=>{
+ if(document.pointerLockElement!==renderer.domElement)return;
+ yaw-=e.movementX*.002;pitch-=e.movementY*.002;
+ pitch=THREE.MathUtils.clamp(pitch,-1.54,1.54);
+});
+document.addEventListener("keydown",e=>{
+ keys[e.code]=true;
+ if(e.code==="Space")e.preventDefault();
+ if(/^Digit[1-4]$/.test(e.code))select(Number(e.code.slice(5))-1);
+ if(e.code==="Space"&&grounded){vy=8;grounded=false;}
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+document.addEventListener("contextmenu",e=>e.preventDefault());
 
-        // Movement flags
-        const moveState = {
-            forward: false,
-            backward: false,
-            left: false,
-            right: false
-        };
+function getHit(){
+ camera.position.copy(player);
+ camera.rotation.set(pitch,yaw,0,"YXZ");
+ ray.setFromCamera(new THREE.Vector2(0,0),camera);
+ return ray.intersectObjects(meshes,false)[0];
+}
+document.addEventListener("mousedown",e=>{
+ if(document.pointerLockElement!==renderer.domElement)return;
+ if(e.button!==0&&e.button!==2)return;
+ const hit=getHit();if(!hit)return;
+ if(e.button===0){
+  if(hit.object.userData.y<=-3)return;
+  removeBlock(hit.object);
+ }else{
+  const p=hit.object.position.clone().add(hit.face.normal);
+  const x=Math.round(p.x),y=Math.round(p.y),z=Math.round(p.z);
+  if(Math.abs(x-player.x)<.8&&Math.abs(z-player.z)<.8&&y>=player.y-1.7&&y<=player.y+.2)return;
+  addBlock(x,y,z,types[selected].name);
+ }
+});
 
-        // Keyboard controls
-        document.addEventListener('keydown', e => {
-            switch(e.key.toLowerCase()) {
-                case 'w': moveState.forward = true; break;
-                case 's': moveState.backward = true; break;
-                case 'a': moveState.left = true; break;
-                case 'd': moveState.right = true; break;
-            }
-        });
+function update(dt){
+ const speed=keys.ShiftLeft?8:5;
+ const f=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+ const r=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+ const m=new THREE.Vector3();
+ if(keys.KeyW)m.add(f);if(keys.KeyS)m.sub(f);
+ if(keys.KeyD)m.add(r);if(keys.KeyA)m.sub(r);
+ if(m.lengthSq())m.normalize().multiplyScalar(speed*dt);
+ player.x=THREE.MathUtils.clamp(player.x+m.x,-23,23);
+ player.z=THREE.MathUtils.clamp(player.z+m.z,-23,23);
 
-        document.addEventListener('keyup', e => {
-            switch(e.key.toLowerCase()) {
-                case 'w': moveState.forward = false; break;
-                case 's': moveState.backward = false; break;
-                case 'a': moveState.left = false; break;
-                case 'd': moveState.right = false; break;
-            }
-        });
+ vy-=22*dt;player.y+=vy*dt;
+ if(player.y<=2.7){player.y=2.7;vy=0;grounded=true;}
+ camera.position.copy(player);camera.rotation.set(pitch,yaw,0,"YXZ");
+}
 
-        // Mouse look
-        let yaw = 0;
-        let pitch = 0;
-
-        document.addEventListener('mousemove', e => {
-            if (document.pointerLockElement !== canvas) return;
-
-            const sensitivity = 0.002;
-            yaw -= e.movementX * sensitivity;
-            pitch -= e.movementY * sensitivity;
-            pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
-        });
-
-        // Lock pointer on click
-        canvas.addEventListener('click', () => {
-            canvas.requestPointerLock();
-        });
-
-        // Place/Remove Test Objects
-        document.addEventListener('mousedown', e => {
-            if (document.pointerLockElement !== canvas) return;
-
-            // Raycaster for interaction
-            const raycaster = new THREE.Raycaster();
-            raycaster.setFromCamera(new THREE.Vector2(), camera);
-
-            const intersects = raycaster.intersectObjects(Object.values(blocks));
-
-            if (intersects.length > 0) {
-                const point = intersects[0].point;
-                const face = intersects[0].face.normal;
-
-                const targetPos = new THREE.Vector3(
-                    Math.round(point.x + face.x * 0.5),
-                    Math.round(point.y + face.y * 0.5),
-                    Math.round(point.z + face.z * 0.5)
-                );
-
-                const key = `${targetPos.x},${targetPos.y},${targetPos.z}`;
-
-                if (e.button === 0) { // Left click - place
-                    if (!blocks[key]) {
-                        const newObj = new THREE.Mesh(blockGeometry, materials.testObject);
-                        newObj.position.copy(targetPos);
-                        scene.add(newObj);
-                        blocks[key] = newObj;
-                    }
-                } else if (e.button === 2) { // Right click - remove
-                    if (blocks[key] && blocks[key].material !== materials.stone && blocks[key].material !== materials.original) {
-                        scene.remove(blocks[key]);
-                        delete blocks[key];
-                    }
-                }
-            }
-        });
-
-        // Prevent context menu
-        canvas.addEventListener('contextmenu', e => e.preventDefault());
-
-        // Animation loop
-        function animate() {
-            requestAnimationFrame(animate);
-
-            const speed = 0.2;
-            const dx = Math.sin(yaw) * speed;
-            const dz = Math.cos(yaw) * speed;
-
-            if (moveState.forward) {
-                camera.position.x -= dx;
-                camera.position.z -= dz;
-            }
-            if (moveState.backward) {
-                camera.position.x += dx;
-                camera.position.z += dz;
-            }
-            if (moveState.left) {
-                camera.position.x -= dz;
-                camera.position.z += dx;
-            }
-            if (moveState.right) {
-                camera.position.x += dz;
-                camera.position.z -= dx;
-            }
-
-            camera.rotation.order = 'YXZ';
-            camera.rotation.y = yaw;
-            camera.rotation.x = pitch;
-
-            renderer.render(scene, camera);
-        }
-
-        animate();
-
-        console.log("Voxel world initialized.");
-    </script>
+let last=performance.now();
+function animate(now){
+ requestAnimationFrame(animate);
+ const dt=Math.min((now-last)/1000,.05);last=now;
+ update(dt);renderer.render(scene,camera);
+}
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);
+});
+animate(performance.now());
+</script>
 </body>
 </html>
-
-
-
